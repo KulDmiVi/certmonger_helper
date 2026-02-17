@@ -2,13 +2,9 @@
 
 import os
 import sys
-import base64
 import gssapi
-import pwd
-import json
 import subprocess
 import requests
-from requests_kerberos import HTTPKerberosAuth, OPTIONAL
 import logging
 import urllib3
 from urllib.parse import urlparse
