@@ -61,10 +61,10 @@ class SafeTechApi:
             'get_templates': '',
         }
 
-    def request_serticate(self, encode_token, request_data):
+    def request_certificate(self, encode_token, request_data):
         """Запрос сертификата в ЦC"""
         self.logger.info('Request certificate')
-
+        response = ''
         service_url = self.ca_url + self.api_endpoint['request_certificate']
 
         headers = {
@@ -83,7 +83,6 @@ class SafeTechApi:
             )
         except Exception as e:
             self.logger.error(f'Get cert request error: {e}')
-
         return response
 
 
@@ -109,21 +108,26 @@ class CertHelper:
         self.logger.debug(f"Service URL: {service_hostname}")
 
         token = self.get_token(req_principal, service_hostname)
+        self.logger.debug(f"Authorization token: {token}")
 
     def get_token(self, principal, service_hostname):
         """Получает токен Kerberos для principal."""
         self.logger.info("Get Kerberos token.")
-        auth_header = self.get_host_token(principal, service_hostname)
-        # if principal.startswith('host/'):
-        #    auth_header = self.get_host_token(principal, service_hostname)
-        # else:
-        #    auth_header = self.get_user_token(principal, principal)
+
+        if principal.startswith('host/'):
+            principal = "CLIENT1$@TEST.CA"
+            auth_header = self.get_host_token(principal, service_hostname)
+        else:
+            auth_header = self.get_user_token(principal, principal)
+
+        return auth_header
 
     def get_host_token(self, principal, service_hostname):
         """Получения токена для хоста."""
         self.logger.info("Get host token")
+        token = ''
         keytab_path = "/etc/krb5.keytab"
-        principal = "CLIENT1$@TEST.CA"
+
         self.logger.info(f"set env")
         kinit_cmd = ["kinit", "-k", "-t", f"{keytab_path}", f"{principal}"]
         result = subprocess.run(kinit_cmd,
@@ -134,6 +138,8 @@ class CertHelper:
         self.logger.info(f"RESULT: {result}")
         principal_name = gssapi.Name(principal, gssapi.NameType.kerberos_principal)
         self.logger.info(f"PRINCIPAL: {principal_name}")
+
+        return token
 
     def get_user_token(self, user_name, service_hostname):
         """Получения токена пользователя"""
