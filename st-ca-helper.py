@@ -129,7 +129,7 @@ class CertHelper:
         keytab_path = "/etc/krb5.keytab"
         principal = "CLIENT1$@TEST.CA"
         self.logger.info(f"set env")
-        kinit_cmd = ["kinit", "-", "-t", f"{keytab_path}", f"{principal}"]
+        kinit_cmd = ["kinit", "-k", "-t", f"{keytab_path}", f"{principal}"]
         result = subprocess.run(kinit_cmd,
                                 capture_output=True,
                                 text=True,
