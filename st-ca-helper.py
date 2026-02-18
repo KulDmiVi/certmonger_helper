@@ -159,7 +159,7 @@ class CertHelper:
             self.logger.debug(f"PRINCIPAL NAME {principal_name}. TARGET NAME: {target_name}")
             store = {'keytab': keytab_path}
             creds = gssapi.Credentials(
-                name=computer_account,
+                name=principal_name,
                 store=store,
                 usage='initiate'
             )
