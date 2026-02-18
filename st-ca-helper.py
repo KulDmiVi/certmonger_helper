@@ -154,7 +154,7 @@ class CertHelper:
                                     timeout=10
                                     )
             self.logger.debug(f"KINIT RESULT: {result}")
-            principal_name = gssapi.Name(principal, gssapi.NameType.kerberos_principal)
+            principal_name = gssapi.Name({computer_account}@{domain_part}, gssapi.NameType.kerberos_principal)
             target_name = gssapi.Name(service_hostname, gssapi.NameType.kerberos_principal)
             self.logger.debug(f"PRINCIPAL NAME {principal_name}. TARGET NAME: {target_name}")
             store = {'keytab': keytab_path}
