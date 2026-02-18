@@ -146,7 +146,9 @@ class CertHelper:
         self.logger.info("Get host token")
         try:
             keytab_path = "/etc/krb5.keytab"
+            target_service = "HTTP/{service_hostname}@{realm}"
             computer_account, domain_part = self.get_computer_account(principal)
+
             kinit_cmd = ["kinit", "-k", "-t", f"{keytab_path}", f"{computer_account}@{domain_part}"]
             result = subprocess.run(kinit_cmd,
                                     capture_output=True,
@@ -155,7 +157,7 @@ class CertHelper:
                                     )
             self.logger.debug(f"KINIT RESULT: {result}")
             principal_name = gssapi.Name(f"{computer_account}@{domain_part}", gssapi.NameType.kerberos_principal)
-            target_name = gssapi.Name(service_hostname, gssapi.NameType.kerberos_principal)
+            target_name = gssapi.Name(target_service, gssapi.NameType.kerberos_principal)
             self.logger.debug(f"PRINCIPAL NAME {principal_name}. TARGET NAME: {target_name}")
             store = {'keytab': keytab_path}
             creds = gssapi.Credentials(
