@@ -144,30 +144,31 @@ class CertHelper:
     def get_host_token(self, principal, service_hostname):
         """Получения токена для хоста."""
         self.logger.info("Get host token")
+        try:
+            keytab_path = "/etc/krb5.keytab"
+            computer_account, domain_part = self.get_computer_account(principal)
+            kinit_cmd = ["kinit", "-k", "-t", f"{keytab_path}", f"{computer_account}@{domain_part}"]
+            result = subprocess.run(kinit_cmd,
+                                    capture_output=True,
+                                    text=True,
+                                    timeout=10
+                                    )
+            self.logger.debug(f"KINIT RESULT: {result}")
+            principal_name = gssapi.Name(computer_account, gssapi.NameType.kerberos_principal)
+            target_name = gssapi.Name(service_hostname, gssapi.NameType.kerberos_principal)
+            self.logger.debug(f"PRINCIPAL NAME {principal_name}. TARGET NAME: {target_name}")
+            store = {'keytab': keytab_path}
+            creds = gssapi.Credentials(
+                name=computer_account,
+                store=store,
+                usage='initiate'
+            )
 
-        keytab_path = "/etc/krb5.keytab"
-        computer_account, domain_part = self.get_computer_account(principal)
-        self.logger.debug("")
-        kinit_cmd = ["kinit", "-k", "-t", f"{keytab_path}", f"{computer_account}@{domain_part}"]
-        result = subprocess.run(kinit_cmd,
-                                capture_output=True,
-                                text=True,
-                                timeout=10
-                                )
-        self.logger.debug(f"KINIT RESULT: {result}")
-        principal_name = gssapi.Name(computer_account, gssapi.NameType.kerberos_principal)
-        target_name = gssapi.Name(service_hostname, gssapi.NameType.kerberos_principal)
-        self.logger.debug(f"PRINCIPAL NAME {principal_name}. TARGET NAME: {target_name}")
-        store = {{'keytab': keytab_path}}
-        creds = gssapi.Credentials(
-            name=computer_account,
-            store=store,
-            usage='initiate'
-        )
-        ctx = gssapi.SecurityContext(name=target_name, creds=creds, usage="initiate")
-        token = ctx.step()
-        self.logger.debug(f"HOST TOKEN: {token}")
-
+            ctx = gssapi.SecurityContext(name=target_name, creds=creds, usage="initiate")
+            token = ctx.step()
+            self.logger.debug(f"HOST TOKEN: {token}")
+        except Exception as e:
+            self.logger.debug(f"get host token exception {e}")
         return token
 
     def get_user_token(self, user_name, service_hostname):
