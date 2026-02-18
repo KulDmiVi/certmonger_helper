@@ -14,6 +14,7 @@ CONF_PATH = "/usr/share/certmonger/helper/helper.conf"
 
 def read_conf():
     """Чтение конфигурационного файла"""
+
     ca_url = "https://127.0.0.0"
     log_level = "info"
     log_path = "ca_helper.log"
@@ -123,23 +124,38 @@ class CertHelper:
 
     def get_computer_account(self, principal):
         """Получение имени компьютера в домене"""
-        computer_account = ""
-        return computer_account
+        domain_part = ''
+        if '@' in principal:
+            service_part = principal.split('@')[0]
+            domain_part = principal.split('@')[1]
+        else:
+            service_part = principal
+
+        if '/' in service_part:
+            hostname_with_domain = service_part.split('/')[1]
+        else:
+            hostname_with_domain = service_part
+
+        short_hostname = hostname_with_domain.split('.')[0]
+        computer_account = f"{short_hostname.upper()}$"
+
+        return computer_account, domain_part
 
     def get_host_token(self, principal, service_hostname):
         """Получения токена для хоста."""
         self.logger.info("Get host token")
         token = ''
         keytab_path = "/etc/krb5.keytab"
-        computer_account = self.get_computer_account(principal)
-        kinit_cmd = ["kinit", "-k", "-t", f"{keytab_path}", f"{computer_account}"]
+        computer_account, domain_part = self.get_computer_account(principal)
+
+        kinit_cmd = ["kinit", "-k", "-t", f"{keytab_path}", f"{computer_account}@{domain_part}"]
         result = subprocess.run(kinit_cmd,
                                 capture_output=True,
                                 text=True,
                                 timeout=10
                                 )
         self.logger.info(f"RESULT: {result}")
-        principal_name = gssapi.Name(principal, gssapi.NameType.kerberos_principal)
+        principal_name = gssapi.Name(computer_account, gssapi.NameType.kerberos_principal)
         self.logger.info(f"PRINCIPAL: {principal_name}")
 
         return token
