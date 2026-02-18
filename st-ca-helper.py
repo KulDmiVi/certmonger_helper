@@ -8,7 +8,6 @@ import requests
 import logging
 import urllib3
 from urllib.parse import urlparse
-import socket
 
 CONF_PATH = "/usr/share/certmonger/helper/helper.conf"
 
@@ -114,29 +113,26 @@ class CertHelper:
     def get_token(self, principal, service_hostname):
         """Получает токен Kerberos для principal."""
         self.logger.info("Get Kerberos token.")
-        hostname = socket.gethostname()
-        fqdn = socket.getfqdn(hostname)
-
-        self.logger.info(f"Short hostname: {hostname}")
-        self.logger.info(f"FQDN: {fqdn}")
 
         if principal.startswith('host/'):
-
-            principal = "CLIENT1$@TEST.CA"
             auth_header = self.get_host_token(principal, service_hostname)
         else:
             auth_header = self.get_user_token(principal, principal)
 
         return auth_header
 
+    def get_computer_account(self, principal):
+        """Получение имени компьютера в домене"""
+        computer_account = ""
+        return computer_account
+
     def get_host_token(self, principal, service_hostname):
         """Получения токена для хоста."""
         self.logger.info("Get host token")
         token = ''
         keytab_path = "/etc/krb5.keytab"
-
-        self.logger.info(f"set env")
-        kinit_cmd = ["kinit", "-k", "-t", f"{keytab_path}", f"{principal}"]
+        computer_account = self.get_computer_account(principal)
+        kinit_cmd = ["kinit", "-k", "-t", f"{keytab_path}", f"{computer_account}"]
         result = subprocess.run(kinit_cmd,
                                 capture_output=True,
                                 text=True,
