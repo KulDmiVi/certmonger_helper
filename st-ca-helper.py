@@ -8,6 +8,7 @@ import requests
 import logging
 import urllib3
 from urllib.parse import urlparse
+import socket
 
 CONF_PATH = "/usr/share/certmonger/helper/helper.conf"
 
@@ -113,8 +114,14 @@ class CertHelper:
     def get_token(self, principal, service_hostname):
         """Получает токен Kerberos для principal."""
         self.logger.info("Get Kerberos token.")
+        hostname = socket.gethostname()
+        fqdn = socket.getfqdn(hostname)
+
+        self.logger.info(f"Short hostname: {hostname}")
+        self.logger.info(f"FQDN: {fqdn}")
 
         if principal.startswith('host/'):
+
             principal = "CLIENT1$@TEST.CA"
             auth_header = self.get_host_token(principal, service_hostname)
         else:
