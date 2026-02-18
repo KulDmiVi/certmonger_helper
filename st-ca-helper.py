@@ -146,9 +146,10 @@ class CertHelper:
         self.logger.info("Get host token")
         try:
             keytab_path = "/etc/krb5.keytab"
-            target_service = "HTTP/{service_hostname}@{realm}"
-            computer_account, domain_part = self.get_computer_account(principal)
 
+            computer_account, domain_part = self.get_computer_account(principal)
+            realm = f"{computer_account}@{domain_part}"
+            target_service = f"HTTP/{service_hostname}@{realm}"
             kinit_cmd = ["kinit", "-k", "-t", f"{keytab_path}", f"{computer_account}@{domain_part}"]
             result = subprocess.run(kinit_cmd,
                                     capture_output=True,
