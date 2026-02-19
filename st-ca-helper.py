@@ -65,15 +65,7 @@ class KerberosAuthentication:
         self.logger = logger
         self.keytab_path = keytab_path
 
-    def get_realm(self):
-        """
-        Получает Kerberos‑realm из конфигурации системы.
 
-        :return: строка с realm
-        """
-        ctx = gssapi.init_sec_context()
-        realm = ctx.mech_cred.name.realm
-        return str(realm)
 
     def get_host_token(self, host_name, service_name):
         """
@@ -85,8 +77,8 @@ class KerberosAuthentication:
         """
         self.logger.info(f"Получения токена для аутентификации")
         try:
-            realm = self.get_realm()
-            upn = self.get_upn(host_name)
+
+            upn, realm = self.parse_host_name(host_name)
 
             client_principal_name = f"{upn}@{realm}"
             target_principal_name = f"HTTP/{service_name}@{realm}"
@@ -142,24 +134,28 @@ class KerberosAuthentication:
             self.logger.error(f"Ошибка получения токена {e}")
             return ''
 
-    def get_upn(self, host_name):
+    def parse_host_name(self, host_name):
         """
-        Формирует UPN (User Principal Name) для компьютера в домене.
+        ормирует UPN для компьютера в домене и извлекает realm.
 
         :param host_name: строка с именем хоста (может содержать домен/сервис)
 
         :return: UPN в формате 'HOSTNAME$' (например, 'CLIENT1$')
         """
-        if '@' in host_name:
-            host_name = host_name.split('@')[0]
 
+        realm = ''
+
+        if '@' in host_name:
+            parts = host_name.split('@', 1)
+            host_name = parts[0]
+            realm = parts[1].strip()
         if '/' in host_name:
             host_name = host_name.split('/')[1]
 
         short_hostname = host_name.split('.')[0]
-
         computer_account = f"{short_hostname.upper()}$"
-        return computer_account
+
+        return computer_account, realm
 
     def get_user_token(self, user_name, service_name):
         pass
