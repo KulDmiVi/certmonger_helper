@@ -148,17 +148,20 @@ class CertHelper:
             keytab_path = "/etc/krb5.keytab"
 
             computer_account, domain_part = self.get_computer_account(principal)
-            realm = f"{computer_account}@{domain_part}"
-            target_service = f"HTTP/{service_hostname}@{realm}"
-            kinit_cmd = ["kinit", "-k", "-t", f"{keytab_path}", f"{computer_account}@{domain_part}"]
+            host_principal = f"{computer_account}@{domain_part}"
+
+            target_service = f"HTTP/{service_hostname}@{domain_part}"
+
+            kinit_cmd = ["kinit", "-k", "-t", keytab_path, host_principal]
             result = subprocess.run(kinit_cmd,
                                     capture_output=True,
                                     text=True,
                                     timeout=10
                                     )
             self.logger.debug(f"KINIT RESULT: {result}")
-            principal_name = gssapi.Name(f"{computer_account}@{domain_part}", gssapi.NameType.kerberos_principal)
+            principal_name = gssapi.Name(host_principal, gssapi.NameType.kerberos_principal)
             target_name = gssapi.Name(target_service, gssapi.NameType.kerberos_principal)
+
             self.logger.debug(f"PRINCIPAL NAME {principal_name}. TARGET NAME: {target_name}")
             store = {'keytab': keytab_path}
             creds = gssapi.Credentials(
@@ -177,7 +180,7 @@ class CertHelper:
     def get_user_token(self, user_name, service_hostname):
         """Получения токена пользователя"""
         self.logger.info("get user token")
-        realm = "CLIENT1@TEST.CA"
+        realm = "TEST.CA"
         tmp_script = f"/tmp/tmp_get_user_key.py"
         txt_script = f'''#!/usr/bin/env python3
 import base64
