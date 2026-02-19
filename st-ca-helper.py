@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-
+import base64
 import os
 import sys
 import gssapi
@@ -65,8 +65,6 @@ class KerberosAuthentication:
         self.logger = logger
         self.keytab_path = keytab_path
 
-
-
     def get_host_token(self, host_name, service_name):
         """
         Получает GSSAPI‑токен для аутентификации на службе.
@@ -129,7 +127,7 @@ class KerberosAuthentication:
             token = ctx.step()
 
             self.logger.info("GSSAPI токен успешно получен")
-            return token
+            return base64.b64encode(token).decode("utf-8")
         except Exception as e:
             self.logger.error(f"Ошибка получения токена {e}")
             return ''
@@ -158,7 +156,35 @@ class KerberosAuthentication:
         return computer_account, realm
 
     def get_user_token(self, user_name, service_name):
-        pass
+
+        realm = "TEST.CA"
+        tmp_script = f"/tmp/tmp_get_user_key.py"
+        txt_script = f'''#!/usr/bin/env python3
+        import base64
+        import gssapi
+        import pwd
+        import sys
+        user_info = pwd.getpwnam("{user_name}")
+        uid = user_info.pw_uid
+        keyring_cache = f"KEYRING:persistent:{{uid}}"
+        service_principal = f"HTTP/{service_name}@{realm}"
+        target_name = gssapi.Name(service_principal, gssapi.NameType.kerberos_principal)
+        creds = gssapi.Credentials(usage="initiate")
+        ctx = gssapi.SecurityContext(name=target_name, creds=creds, usage="initiate")
+        token = ctx.step()
+        encode_token = base64.b64encode(token).decode("utf-8")
+        print(encode_token)
+        sys.exit(0)
+        '''
+        with open(tmp_script, 'w') as f:
+            f.write(txt_script)
+
+        os.chmod(tmp_script, 0o755)
+
+        cmd = ['su', '-', user_name, '-c', f'python3 {tmp_script}']
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        key = result.stdout.replace("\n", "")
+        return key
 
 
 class SafeTechApi:
@@ -170,15 +196,22 @@ class SafeTechApi:
             'get_templates': '',
         }
 
-    def request_certificate(self, encode_token, request_data):
-        """Запрос сертификата в ЦC"""
+    def request_certificate(self, encoded_token, request_data):
+        """
+        Отправляет запрос на получение сертификата в Центр сертификации.
+
+        :param encoded_token: Base64‑закодированный токен
+        :param request_data: словарь с данными запроса
+        :return: объект Response от requests или None при ошибке
+        :raises: ValueError при некорректных входных данных
+        """
         self.logger.info('Request certificate')
         response = ''
         service_url = self.ca_url + self.api_endpoint['request_certificate']
 
         headers = {
             "Content-Type": "application/json",
-            "Authorization": f"Negotiate {encode_token}"
+            "Authorization": f"Negotiate {encoded_token}"
         }
 
         try:
@@ -212,12 +245,21 @@ class CertHelper:
         req_principal = os.getenv('CERTMONGER_REQ_PRINCIPAL', '')
         self.logger.debug(f"Request principal: {req_principal}")
 
-        parsed = urlparse(self.ca_url)
-        service_hostname = parsed.hostname
+        parsed_url = urlparse(self.ca_url)
+        service_hostname = parsed_url.hostname
         self.logger.debug(f"Service URL: {service_hostname}")
 
         token = self.get_token(req_principal, service_hostname)
-        self.logger.debug(f"Authorization token: {token}")
+
+        template_name = os.getenv('CERTMONGER_TEMPLATE_NAME', '')
+
+        data = {
+            'template': template_name,
+            'csr': self.clean_csr(csr)
+        }
+        response = self.api_helper.request_certificate(token, data)
+        self.logger.info(f"response status code {response.status_code}")
+
 
     def get_token(self, principal, service_hostname):
         """Получает токен Kerberos для principal."""
@@ -227,7 +269,6 @@ class CertHelper:
             auth_header = kerberos_authentication.get_host_token(principal, service_hostname)
         else:
             auth_header = kerberos_authentication.get_user_token(principal, principal)
-
         return auth_header
 
     def clean_csr(self, csr_text):
