@@ -214,6 +214,10 @@ class SafeTechApi:
             "Authorization": f"Negotiate {encoded_token}"
         }
 
+        self.logger.info(f"url {service_url}")
+        self.logger.info(f"header {headers}")
+        self.logger.info(f"request {request_data}")
+
         try:
             urllib3.disable_warnings()
             response = requests.post(
