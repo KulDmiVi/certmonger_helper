@@ -84,60 +84,63 @@ class KerberosAuthentication:
         :return: байтовая строка токена GSSAPI
         """
         self.logger.info(f"Получения токена для аутентификации")
+        try:
+            realm = self.get_realm()
+            upn = self.get_upn(host_name)
 
-        realm = self.get_realm()
-        upn = self.get_upn(host_name)
+            client_principal_name = f"{upn}@{realm}"
+            target_principal_name = f"HTTP/{service_name}@{realm}"
 
-        client_principal_name = f"{upn}@{realm}"
-        target_principal_name = f"HTTP/{service_name}@{realm}"
+            self.logger.info(f"Клиентский principal: {client_principal_name}")
+            self.logger.info(f"Целевой principal: {target_principal_name}")
 
-        self.logger.info(f"Клиентский principal: {client_principal_name}")
-        self.logger.info(f"Целевой principal: {target_principal_name}")
+            kinit_cmd = [
+                "kinit",
+                "-k",
+                "-t", self.keytab_path,
+                client_principal_name
+            ]
 
-        kinit_cmd = [
-            "kinit",
-            "-k",
-            "-t", self.keytab_path,
-            client_principal_name
-        ]
+            result = subprocess.run(
+                kinit_cmd,
+                capture_output=True,
+                text=True,
+                timeout=10
+            )
 
-        result = subprocess.run(
-            kinit_cmd,
-            capture_output=True,
-            text=True,
-            timeout=10
-        )
+            if result.returncode != 0:
+                return ""
 
-        if result.returncode != 0:
-            return ""
+            client_principal = gssapi.Name(
+                client_principal_name,
+                gssapi.NameType.kerberos_principal
+            )
 
-        client_principal = gssapi.Name(
-            client_principal_name,
-            gssapi.NameType.kerberos_principal
-        )
+            target_principal = gssapi.Name(
+                target_principal_name,
+                gssapi.NameType.kerberos_principal
+            )
 
-        target_principal = gssapi.Name(
-            target_principal_name,
-            gssapi.NameType.kerberos_principal
-        )
+            store = {'keytab': self.keytab_path}
 
-        store = {'keytab': self.keytab_path}
+            creds = gssapi.Credentials(
+                name=client_principal,
+                store=store,
+                usage='initiate'
+            )
+            ctx = gssapi.SecurityContext(
+                name=target_principal,
+                creds=creds,
+                usage="initiate"
+            )
 
-        creds = gssapi.Credentials(
-            name=client_principal,
-            store=store,
-            usage='initiate'
-        )
-        ctx = gssapi.SecurityContext(
-            name=target_principal,
-            creds=creds,
-            usage="initiate"
-        )
+            token = ctx.step()
 
-        token = ctx.step()
-
-        self.logger.info("GSSAPI токен успешно получен")
-        return token
+            self.logger.info("GSSAPI токен успешно получен")
+            return token
+        except Exception as e:
+            self.logger.error(f"Ошибка получения токена {e}")
+            return ''
 
     def get_upn(self, host_name):
         """
