@@ -53,6 +53,114 @@ def get_logger(log_level, log_path):
     return logger
 
 
+class KerberosAuntefication:
+
+    def __init__(self, logger, keytab_path="/etc/krb5.keytab"):
+        """
+        Инициализация экземпляра.
+
+        :param logger: объект логгера для записи событий
+        :param keytab_path: путь к keytab‑файлу (по умолчанию /etc/krb5.keytab)
+        """
+        self.logger = logger
+        self.keytab_path = keytab_path
+
+    def get_realm(self):
+        """
+        Получает Kerberos‑realm из конфигурации системы.
+
+        :return: строка с realm
+        """
+        ctx = gssapi.init_sec_context()
+        realm = ctx.mech_cred.name.realm
+        return str(realm)
+
+    def get_host_token(self, host_name, service_name):
+        """
+        Получает GSSAPI‑токен для аутентификации на службе.
+
+        :param host_name: имя хоста
+        :param service_name: имя целевой службы
+        :return: байтовая строка токена GSSAPI
+        """
+
+        realm = self.get_realm()
+        upn = self.get_upn(host_name)
+
+        client_principal_name = f"{upn}@{realm}"
+        target_principal_name = f"HTTP/{service_name}@{realm}"
+
+        self.logger.info(f"Клиентский principal: {client_principal_name}")
+        self.logger.info(f"Целевой principal: {target_principal_name}")
+
+        kinit_cmd = [
+            "kinit",
+            "-k",
+            "-t", self.keytab_path,
+            client_principal_name
+        ]
+
+        result = subprocess.run(
+            kinit_cmd,
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+
+        if result.returncode != 0:
+            return ""
+
+        client_principal = gssapi.Name(
+            client_principal_name,
+            gssapi.NameType.kerberos_principal
+        )
+
+        target_principal = gssapi.Name(
+            target_principal_name,
+            gssapi.NameType.kerberos_principal
+        )
+
+        store = {'keytab': self.keytab_path}
+
+        creds = gssapi.Credentials(
+            name=client_principal,
+            store=store,
+            usage='initiate'
+        )
+        ctx = gssapi.SecurityContext(
+            name=target_principal,
+            creds=creds,
+            usage="initiate"
+        )
+
+        token = ctx.step()
+
+        self.logger.info("GSSAPI токен успешно получен")
+        return token
+
+    def get_upn(self, host_name):
+        """
+        Формирует UPN (User Principal Name) для компьютера в домене.
+
+        :param host_name: строка с именем хоста (может содержать домен/сервис)
+
+        :return: UPN в формате 'HOSTNAME$' (например, 'CLIENT1$')
+        """
+        if '@' in host_name:
+            host_name = host_name.split('@')[0]
+
+        if '/' in host_name:
+            host_name = host_name.split('/')[1]
+
+        short_hostname = host_name.split('.')[0]
+
+        computer_account = f"{short_hostname.upper()}$"
+        return computer_account
+
+    def get_user_token(self, user_name, service_name):
+        pass
+
+
 class SafeTechApi:
     def __init__(self, ca_url, logger):
         self.ca_url = ca_url
@@ -114,100 +222,13 @@ class CertHelper:
     def get_token(self, principal, service_hostname):
         """Получает токен Kerberos для principal."""
         self.logger.info("Get Kerberos token.")
-
+        kerberos_auntification = KerberosAuntefication(self.logger)
         if principal.startswith('host/'):
-            auth_header = self.get_host_token(principal, service_hostname)
+            auth_header = kerberos_auntification.get_host_token(principal, service_hostname)
         else:
-            auth_header = self.get_user_token(principal, principal)
+            auth_header = kerberos_auntification.get_user_token(principal, principal)
 
         return auth_header
-
-    def get_computer_account(self, principal):
-        """Получение имени компьютера в домене"""
-        domain_part = ''
-        if '@' in principal:
-            service_part = principal.split('@')[0]
-            domain_part = principal.split('@')[1]
-        else:
-            service_part = principal
-
-        if '/' in service_part:
-            hostname_with_domain = service_part.split('/')[1]
-        else:
-            hostname_with_domain = service_part
-
-        short_hostname = hostname_with_domain.split('.')[0]
-        computer_account = f"{short_hostname.upper()}$"
-
-        return computer_account, domain_part
-
-    def get_host_token(self, principal, service_hostname):
-        """Получения токена для хоста."""
-        self.logger.info("Get host token")
-        try:
-            keytab_path = "/etc/krb5.keytab"
-
-            computer_account, domain_part = self.get_computer_account(principal)
-            host_principal = f"{computer_account}@{domain_part}"
-
-            target_service = f"HTTP/{service_hostname}@{domain_part}"
-
-            kinit_cmd = ["kinit", "-k", "-t", keytab_path, host_principal]
-            result = subprocess.run(kinit_cmd,
-                                    capture_output=True,
-                                    text=True,
-                                    timeout=10
-                                    )
-            self.logger.debug(f"KINIT RESULT: {result}")
-            principal_name = gssapi.Name(host_principal, gssapi.NameType.kerberos_principal)
-            target_name = gssapi.Name(target_service, gssapi.NameType.kerberos_principal)
-
-            self.logger.debug(f"PRINCIPAL NAME {principal_name}. TARGET NAME: {target_name}")
-            store = {'keytab': keytab_path}
-            creds = gssapi.Credentials(
-                name=principal_name,
-                store=store,
-                usage='initiate'
-            )
-
-            ctx = gssapi.SecurityContext(name=target_name, creds=creds, usage="initiate")
-            token = ctx.step()
-            self.logger.debug(f"HOST TOKEN: {token}")
-        except Exception as e:
-            self.logger.debug(f"get host token exception {e}")
-        return token
-
-    def get_user_token(self, user_name, service_hostname):
-        """Получения токена пользователя"""
-        self.logger.info("get user token")
-        realm = "TEST.CA"
-        tmp_script = f"/tmp/tmp_get_user_key.py"
-        txt_script = f'''#!/usr/bin/env python3
-import base64
-import gssapi
-import pwd
-import sys
-user_info = pwd.getpwnam("{user_name}")
-uid = user_info.pw_uid
-keyring_cache = f"KEYRING:persistent:{{uid}}"
-service_principal = f"HTTP/{service_hostname}@{realm}"
-target_name = gssapi.Name(service_principal, gssapi.NameType.kerberos_principal)
-creds = gssapi.Credentials(usage="initiate")
-ctx = gssapi.SecurityContext(name=target_name, creds=creds, usage="initiate")
-token = ctx.step()
-encode_token = base64.b64encode(token).decode("utf-8")
-print(encode_token)
-sys.exit(0)
-'''
-        with open(tmp_script, 'w') as f:
-            f.write(txt_script)
-
-        os.chmod(tmp_script, 0o755)
-
-        cmd = ['su', '-', user_name, '-c', f'python3 {tmp_script}']
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-        key = result.stdout.replace("\n", "")
-        return key
 
     def clean_csr(self, csr_text):
         """Подготавливаем данные для запроса сертификата"""
