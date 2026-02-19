@@ -53,7 +53,7 @@ def get_logger(log_level, log_path):
     return logger
 
 
-class KerberosAuntefication:
+class KerberosAuthentication:
 
     def __init__(self, logger, keytab_path="/etc/krb5.keytab"):
         """
@@ -83,6 +83,7 @@ class KerberosAuntefication:
         :param service_name: имя целевой службы
         :return: байтовая строка токена GSSAPI
         """
+        self.logger.info(f"Получения токена для аутентификации")
 
         realm = self.get_realm()
         upn = self.get_upn(host_name)
@@ -222,11 +223,11 @@ class CertHelper:
     def get_token(self, principal, service_hostname):
         """Получает токен Kerberos для principal."""
         self.logger.info("Get Kerberos token.")
-        kerberos_auntification = KerberosAuntefication(self.logger)
+        kerberos_authentication = KerberosAuthentication(self.logger)
         if principal.startswith('host/'):
-            auth_header = kerberos_auntification.get_host_token(principal, service_hostname)
+            auth_header = kerberos_authentication.get_host_token(principal, service_hostname)
         else:
-            auth_header = kerberos_auntification.get_user_token(principal, principal)
+            auth_header = kerberos_authentication.get_user_token(principal, principal)
 
         return auth_header
 
