@@ -59,7 +59,7 @@ class KerberosAuthentication:
         """
         Инициализация экземпляра.
 
-        :param logger: объект логгера для записи событий
+        :param logger: объект логера для записи событий
         :param keytab_path: путь к keytab‑файлу (по умолчанию /etc/krb5.keytab)
         """
         self.logger = logger
@@ -134,7 +134,7 @@ class KerberosAuthentication:
 
     def parse_host_name(self, host_name):
         """
-        ормирует UPN для компьютера в домене и извлекает realm.
+        Формирует UPN для компьютера в домене и извлекает realm.
 
         :param host_name: строка с именем хоста (может содержать домен/сервис)
 
@@ -209,20 +209,10 @@ class SafeTechApi:
         response = ''
         service_url = self.ca_url + self.api_endpoint['request_certificate']
 
-        # testing
-        cmd = ['klist']
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-        self.logger.info(f'klist result {result}')
-
-
         headers = {
             "Content-Type": "application/json",
             "Authorization": f"Negotiate {encoded_token}"
         }
-
-        self.logger.info(f"url {service_url}")
-        self.logger.info(f"header {headers}")
-        self.logger.info(f"request {request_data}")
 
         try:
             urllib3.disable_warnings()
@@ -305,6 +295,10 @@ def main():
     logger = get_logger(log_level, log_path)
 
     logger.info("=== CERTMONGER HELPER STARTED ===")
+
+    for key, value in os.environ.items():
+        if 'CERTMONGER' in key:
+            logger.debug(f"Environment: {key}={value}")
 
     safetech_api = SafeTechApi(ca_url, logger)
     cert_helper = CertHelper(safetech_api, logger)
