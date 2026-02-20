@@ -65,49 +65,59 @@ class KerberosAuthentication:
         self.logger = logger
         self.keytab_path = keytab_path
 
-    def get_host_token(self, host_name, service_name):
+    def principal_auth(self, principal_name, service_hostname=''):
+        """Получает токен Kerberos для principal."""
+        self.logger.info("Get Kerberos token.")
+        upn, realm = self.parse_principal_name(principal_name)
+        service_principal_name = f"HTTP/{service_hostname}@{realm}"
+        principal_name = f"{upn}@{realm}"
+        tgt_status = self.set_tgt(principal_name)
+        if tgt_status:
+            token = self.get_token(principal_name, service_principal_name)
+            return token
+        else:
+            return False
+
+    def set_tgt(self, principal_name):
+        kinit_cmd = [
+            "kinit",
+            "-k",
+            "-t", self.keytab_path,
+            principal_name
+        ]
+
+        result = subprocess.run(
+            kinit_cmd,
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+
+        if result.returncode != 0:
+            self.logger.error("TGT not aviable")
+            return False
+        else:
+            self.logger.error("TGT для {host_principal_name} успешно получен")
+            return True
+
+    def get_token(self, principal_name, service_principal_name):
         """
         Получает GSSAPI‑токен для аутентификации на службе.
 
-        :param host_name: имя хоста
-        :param service_name: имя целевой службы
+        :param principal_name: имя хоста
+        :param service_principal_name: имя целевой службы
         :return: байтовая строка токена GSSAPI
         """
         self.logger.info(f"Получения токена для аутентификации")
         try:
 
-            upn, realm = self.parse_host_name(host_name)
-
-            client_principal_name = f"{upn}@{realm}"
-            target_principal_name = f"HTTP/{service_name}@{realm}"
-
-            self.logger.info(f"Клиентский principal: {client_principal_name}")
-            self.logger.info(f"Целевой principal: {target_principal_name}")
-
-            kinit_cmd = [
-                "kinit",
-                "-k",
-                "-t", self.keytab_path,
-                client_principal_name
-            ]
-
-            result = subprocess.run(
-                kinit_cmd,
-                capture_output=True,
-                text=True,
-                timeout=10
-            )
-
-            if result.returncode != 0:
-                return ""
-
             client_principal = gssapi.Name(
-                client_principal_name,
+                principal_name,
                 gssapi.NameType.kerberos_principal
             )
 
-            target_principal = gssapi.Name(
-                target_principal_name,
+            service_principal_name = gssapi.Name(
+                service_principal_name,
                 gssapi.NameType.kerberos_principal
             )
 
@@ -119,7 +129,7 @@ class KerberosAuthentication:
                 usage='initiate'
             )
             ctx = gssapi.SecurityContext(
-                name=target_principal,
+                name=service_principal_name,
                 creds=creds,
                 usage="initiate"
             )
@@ -132,7 +142,7 @@ class KerberosAuthentication:
             self.logger.error(f"Ошибка получения токена {e}")
             return ''
 
-    def parse_host_name(self, host_name):
+    def parse_principal_name(self, principal):
         """
         Формирует UPN для компьютера в домене и извлекает realm.
 
@@ -142,21 +152,19 @@ class KerberosAuthentication:
         """
 
         realm = ''
-
-        if '@' in host_name:
-            parts = host_name.split('@', 1)
-            host_name = parts[0]
+        principal_name = ''
+        if '@' in principal:
+            parts = principal.split('@', 1)
+            principal_name = parts[0]
             realm = parts[1].strip()
-        if '/' in host_name:
-            host_name = host_name.split('/')[1]
+        if '/' in principal:
+            host_name = principal_name.split('/')[1]
+            short_hostname = host_name.split('.')[0]
+            principal_name = f"{short_hostname.upper()}$"
 
-        short_hostname = host_name.split('.')[0]
-        computer_account = f"{short_hostname.upper()}$"
-
-        return computer_account, realm
+        return principal_name, realm
 
     def get_user_token(self, user_name, service_name):
-
         realm = "TEST.CA"
         tmp_script = f"/tmp/tmp_get_user_key.py"
         txt_script = f'''#!/usr/bin/env python3
@@ -193,10 +201,11 @@ class SafeTechApi:
         self.logger = logger
         self.api_endpoint = {
             'request_certificate': '/ca-core/api/v1/api-client/certs/issue-pem',
+            'download_certificate': '/ca-core/api/v1/api-client/certs/download/',
             'get_templates': '',
         }
 
-    def request_certificate(self, encoded_token, request_data):
+    def request_certificate(self, request_data, encoded_token):
         """
         Отправляет запрос на получение сертификата в Центр сертификации.
 
@@ -205,6 +214,7 @@ class SafeTechApi:
         :return: объект Response от requests или None при ошибке
         :raises: ValueError при некорректных входных данных
         """
+
         self.logger.info('Request certificate')
         response = ''
         service_url = self.ca_url + self.api_endpoint['request_certificate']
@@ -227,51 +237,113 @@ class SafeTechApi:
             self.logger.error(f'Get cert request error: {e}')
         return response
 
+    def download_certificate(self, request_id, encoded_token):
+
+        service_url = self.ca_url + self.api_endpoint['download_certificate'] + request_id
+        headers = {
+            "Authorization": f"Negotiate {encoded_token}"
+        }
+        try:
+            urllib3.disable_warnings()
+            response = requests.get(
+                service_url,
+                headers=headers,
+                verify=False,
+                timeout=10
+            )
+            return response
+        except Exception as e:
+            self.logger.error(f'download cert request error: {e}')
+            return ''
+
 
 class CertHelper:
-    def __init__(self, api_helper, logger):
+    def __init__(self, api_helper, logger, service_url):
         self.api_helper = api_helper
-        self.ca_url = api_helper.ca_url
         self.logger = logger
+        self.krb_auth = KerberosAuthentication(self.logger)
+        self.service_url = service_url
 
     def handler_submit(self):
         """Обрабатывает операцию SUBMIT — запрос сертификата."""
+        try:
+            self.logger.info("Начало обработки запроса сертификата (SUBMIT)")
+            env_csr = os.getenv('CERTMONGER_CSR', '')
+            env_principal = os.getenv('CERTMONGER_REQ_PRINCIPAL', '')
+            env_template_name = os.getenv('CERTMONGER_CA_PROFILE', '')
+            parsed_url = urlparse(self.service_url)
+            service_hostname = parsed_url.hostname
+            request_data = {
+                "templateName": env_template_name,
+                'csr': self.clean_csr(env_csr)
+            }
 
-        self.logger.info("Request certificate")
+            token = self.krb_auth.principal_auth(env_principal, service_hostname)
+            response = self.api_helper.request_certificate(request_data, token)
+            self.logger.info(f"response status code {response.status_code}")
+        except Exception as e:
+            error_msg = f"Критическая ошибка при обработке SUBMIT: {type(e).__name__}: {e}"
+            self.logger.error(error_msg, exc_info=True)
+            raise
 
-        csr = os.getenv('CERTMONGER_CSR', '')
-        self.logger.debug(f"Request csr: {csr}")
+    def handler_poll(self):
+        """Обрабатывает операцию POLL — запрос сертификата."""
 
-        template_name = os.getenv('CERTMONGER_CA_PROFILE')
-        self.logger.debug(f"Template name: {template_name}")
+        self.logger.info("POLL certificate")
 
-        req_principal = os.getenv('CERTMONGER_REQ_PRINCIPAL', '')
-        self.logger.debug(f"Request principal: {req_principal}")
+        # request_id = os.getenv('CERTMONGER_CA_COOKIE')
+        # self.logger.debug(f"CERTMONGER_CA_COOKIE: {request_id}")
+        #
+        # if request_id and request_id.startswith('pending_auth_'):
+        #     tgt_status = check_tgt_staus()
+        #     if not tgt_status:
+        #         # проверим наличие тикета через час
+        #         sys.exit(5)
+        #     else:
+        #         # запрашиваем сертификат
+        #         csr = os.getenv('CERTMONGER_CSR')
+        #         template_name = os.getenv('CERTMONGER_CA_PROFILE')
+        #         data = {
+        #             'template': template_name,
+        #             'csr': self.clean_csr(csr)
+        #         }
+        #         response = self.api_helper.request_certificate(data)
+        #
+        # response = self.api_helper.download_certificate(request_id)
+        # self.logger.info(f"response status code {response.status_code}")
 
-        parsed_url = urlparse(self.ca_url)
-        service_hostname = parsed_url.hostname
-        self.logger.debug(f"Service URL: {service_hostname}")
+    def handler_identify(self):
+        """Обработка операции IDENTIFY — возвращает базовую информацию о помощнике."""
+        self.logger.info("=== STARTING IDENTIFY OPERATION ===")
+        print(f"desc=Custom certificate helper for {self.service_url}\nurl={self.service_url}")
+        sys.exit(0)
 
-        token = self.get_token(req_principal, service_hostname)
+    def handler_get_new_request_requirements(self):
+        """Возвращает требования для нового запроса сертификата."""
+        self.logger.info("=== STARTING GET_NEW_REQUEST_REQUIREMENTS OPERATION ===")
+        print("templateName=required,csr=required")
+        sys.exit(0)
 
-        data = {
-            'template': template_name,
-            'csr': self.clean_csr(csr)
-        }
+    def handler_get_renew_request_requirements(self):
+        """"Возвращает требования для продления сертификата."""
+        self.logger.info("=== STARTING GET_RENEW_REQUEST_REQUIREMENTS ===")
+        requirements = "existing_cert=required,new_csr=optional"
+        print(requirements)
 
-        response = self.api_helper.request_certificate(token, data)
-        self.logger.info(f"response status code {response.status_code}")
+    def handler_get_supported_templates(self):
+        """Возвращает список поддерживаемых шаблонов сертификатов."""
+        self.logger.info("===GET_SUPPORTED_TEMPLATES===")
+        templates = ["SmartCard Logon", "Server", "User", "CodeSigning"]
+        for template in templates:
+            print(template)
+        sys.exit(0)
 
-
-    def get_token(self, principal, service_hostname):
-        """Получает токен Kerberos для principal."""
-        self.logger.info("Get Kerberos token.")
-        kerberos_authentication = KerberosAuthentication(self.logger)
-        if principal.startswith('host/'):
-            auth_header = kerberos_authentication.get_host_token(principal, service_hostname)
-        else:
-            auth_header = kerberos_authentication.get_user_token(principal, principal)
-        return auth_header
+    def handler_get_default_template(self):
+        """Возвращает шаблон сертификата по умолчанию."""
+        self.logger.info("=== STARTING GET_DEFAULT_TEMPLATE ===")
+        default_template = "Server"
+        print(default_template)
+        sys.exit(0)
 
     def clean_csr(self, csr_text):
         """Подготавливаем данные для запроса сертификата"""
@@ -303,12 +375,24 @@ def main():
             logger.debug(f"Environment: {key}={value}")
 
     safetech_api = SafeTechApi(ca_url, logger)
-    cert_helper = CertHelper(safetech_api, logger)
+    cert_helper = CertHelper(safetech_api, logger, ca_url)
 
     operation = os.getenv('CERTMONGER_OPERATION', 'SUBMIT')
 
     if operation == 'SUBMIT':
         cert_helper.handler_submit()
+    elif operation == 'POLL':
+        cert_helper.handler_poll()
+    elif operation == 'IDENTIFY':
+        cert_helper.handler_identify()
+    elif operation == 'GET-NEW-REQUEST-REQUIREMENTS':
+        cert_helper.handler_get_new_request_requirements()
+    elif operation == 'GET-RENEW-REQUEST-REQUIREMENTS':
+        cert_helper.handler_get_renew_request_requirements()
+    elif operation == 'GET-SUPPORTED-TEMPLATES':
+        cert_helper.handler_get_supported_templates()
+    elif operation == 'GET-DEFAULT-TEMPLATE':
+        cert_helper.handler_get_default_template()
     else:
         logger.debug(f"Unsupported operation: {operation}")
         sys.exit(6)
