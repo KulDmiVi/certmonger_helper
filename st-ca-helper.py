@@ -209,6 +209,12 @@ class SafeTechApi:
         response = ''
         service_url = self.ca_url + self.api_endpoint['request_certificate']
 
+        # testing
+        cmd = ['klist']
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        self.logger.info(f'klist result {result}')
+
+
         headers = {
             "Content-Type": "application/json",
             "Authorization": f"Negotiate {encoded_token}"
