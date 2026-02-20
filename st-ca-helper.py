@@ -242,6 +242,9 @@ class CertHelper:
         csr = os.getenv('CERTMONGER_CSR', '')
         self.logger.debug(f"Request csr: {csr}")
 
+        template_name = os.getenv('CERTMONGER_CA_PROFILE')
+        self.logger.debug(f"Template name: {template_name}")
+
         req_principal = os.getenv('CERTMONGER_REQ_PRINCIPAL', '')
         self.logger.debug(f"Request principal: {req_principal}")
 
@@ -251,12 +254,11 @@ class CertHelper:
 
         token = self.get_token(req_principal, service_hostname)
 
-        template_name = os.getenv('CERTMONGER_TEMPLATE_NAME', '')
-
         data = {
             'template': template_name,
             'csr': self.clean_csr(csr)
         }
+
         response = self.api_helper.request_certificate(token, data)
         self.logger.info(f"response status code {response.status_code}")
 
