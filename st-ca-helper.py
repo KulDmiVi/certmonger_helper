@@ -148,7 +148,7 @@ class KerberosAuthentication:
 
             cmd = ['su', '-', principal, '-c', f'python3 {tmp_script_path}']
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-            self.logger.debug(f"User token: {result}")
+            self.logger.debug(f"Execute script result: {result}")
             token = result.stdout.replace("\n", "")
             self.logger.debug(f"User token: {token}")
             return token
