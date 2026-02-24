@@ -121,8 +121,9 @@ class KerberosAuthentication:
             return ''
 
     def get_user_token(self, principal, service_principal):
+        self.logger.debug("Получения токена пользователя")
         try:
-            tmp_script_path = f"/tmp/tmp_get_user_key.py"
+            tmp_script_path = "/tmp/tmp_get_user_key.py"
             txt_script = f'''#!/usr/bin/env python3
             import base64
             import gssapi
@@ -141,6 +142,7 @@ class KerberosAuthentication:
             print(encode_token)
             sys.exit(0)
             '''
+
             with open(tmp_script_path, 'w') as f:
                 f.write(txt_script)
 
