@@ -65,59 +65,34 @@ class KerberosAuthentication:
         self.logger = logger
         self.keytab_path = keytab_path
 
-    def principal_auth(self, principal_name, service_hostname=''):
+    def principal_auth(self, principal, service_principal, is_host=True):
         """Получает токен Kerberos для principal."""
         self.logger.info("Get Kerberos token.")
-        upn, realm = self.parse_principal_name(principal_name)
-        service_principal_name = f"HTTP/{service_hostname}@{realm}"
-        principal_name = f"{upn}@{realm}"
-        tgt_status = self.set_tgt(principal_name)
-        if tgt_status:
-            token = self.get_token(principal_name, service_principal_name)
-            return token
+
+        if is_host:
+            token = self.get_host_token(principal, service_principal)
         else:
-            return False
+            token = self.get_user_token(principal, service_principal)
+        return token
 
-    def set_tgt(self, principal_name):
-        kinit_cmd = [
-            "kinit",
-            "-k",
-            "-t", self.keytab_path,
-            principal_name
-        ]
-
-        result = subprocess.run(
-            kinit_cmd,
-            capture_output=True,
-            text=True,
-            timeout=10
-        )
-
-        if result.returncode != 0:
-            self.logger.error("TGT not aviable")
-            return False
-        else:
-            self.logger.error("TGT для {host_principal_name} успешно получен")
-            return True
-
-    def get_token(self, principal_name, service_principal_name):
+    def get_host_token(self, principal, service_principal):
         """
-        Получает GSSAPI‑токен для аутентификации на службе.
+        Получает GSSAPI‑токен для аутентификации сервисе.
 
         :param principal_name: имя хоста
-        :param service_principal_name: имя целевой службы
+        :param service_principal_name: имя сервиса
         :return: байтовая строка токена GSSAPI
         """
         self.logger.info(f"Получения токена для аутентификации")
         try:
-
+            tgt_status = self.set_tgt(principal)
             client_principal = gssapi.Name(
-                principal_name,
+                principal,
                 gssapi.NameType.kerberos_principal
             )
 
             service_principal_name = gssapi.Name(
-                service_principal_name,
+                service_principal,
                 gssapi.NameType.kerberos_principal
             )
 
@@ -142,57 +117,59 @@ class KerberosAuthentication:
             self.logger.error(f"Ошибка получения токена {e}")
             return ''
 
-    def parse_principal_name(self, principal):
-        """
-        Формирует UPN для компьютера в домене и извлекает realm.
 
-        :param host_name: строка с именем хоста (может содержать домен/сервис)
+    def get_user_token(self, principal, service_principal):
 
-        :return: UPN в формате 'HOSTNAME$' (например, 'CLIENT1$')
-        """
-
-        realm = ''
-        principal_name = ''
-        if '@' in principal:
-            parts = principal.split('@', 1)
-            principal_name = parts[0]
-            realm = parts[1].strip()
-        if '/' in principal:
-            host_name = principal_name.split('/')[1]
-            short_hostname = host_name.split('.')[0]
-            principal_name = f"{short_hostname.upper()}$"
-
-        return principal_name, realm
-
-    def get_user_token(self, user_name, service_name):
-        realm = "TEST.CA"
-        tmp_script = f"/tmp/tmp_get_user_key.py"
+        tmp_script_path = f"/tmp/tmp_get_user_key.py"
         txt_script = f'''#!/usr/bin/env python3
         import base64
         import gssapi
         import pwd
         import sys
-        user_info = pwd.getpwnam("{user_name}")
+        user_info = pwd.getpwnam("{principal}")
         uid = user_info.pw_uid
         keyring_cache = f"KEYRING:persistent:{{uid}}"
-        service_principal = f"HTTP/{service_name}@{realm}"
-        target_name = gssapi.Name(service_principal, gssapi.NameType.kerberos_principal)
+ 
+        target_principal_name = gssapi.Name({service_principal}, gssapi.NameType.kerberos_principal)
         creds = gssapi.Credentials(usage="initiate")
-        ctx = gssapi.SecurityContext(name=target_name, creds=creds, usage="initiate")
+        ctx = gssapi.SecurityContext(name=target_principal_name, creds=creds, usage="initiate")
         token = ctx.step()
         encode_token = base64.b64encode(token).decode("utf-8")
+        
         print(encode_token)
         sys.exit(0)
         '''
-        with open(tmp_script, 'w') as f:
+        with open(tmp_script_path, 'w') as f:
             f.write(txt_script)
 
-        os.chmod(tmp_script, 0o755)
+        os.chmod(tmp_script_path, 0o755)
 
-        cmd = ['su', '-', user_name, '-c', f'python3 {tmp_script}']
+        cmd = ['su', '-', principal, '-c', f'python3 {tmp_script_path}']
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-        key = result.stdout.replace("\n", "")
-        return key
+        token = result.stdout.replace("\n", "")
+        return token
+
+    def set_tgt(self, principal_name):
+        kinit_cmd = [
+            "kinit",
+            "-k",
+            "-t", self.keytab_path,
+            principal_name
+        ]
+
+        result = subprocess.run(
+            kinit_cmd,
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+
+        if result.returncode != 0:
+            self.logger.error("TGT not aviable")
+            return False
+        else:
+            self.logger.error("TGT для {host_principal_name} успешно получен")
+            return True
 
 
 class SafeTechApi:
@@ -267,19 +244,22 @@ class CertHelper:
     def handler_submit(self):
         """Обрабатывает операцию SUBMIT — запрос сертификата."""
         try:
-            self.logger.info("Начало обработки запроса сертификата (SUBMIT)")
-            env_csr = os.getenv('CERTMONGER_CSR', '')
+            self.logger.info("Обработка запроса на получения сертификата (SUBMIT)")
+
             env_principal = os.getenv('CERTMONGER_REQ_PRINCIPAL', '')
-            env_template_name = os.getenv('CERTMONGER_CA_PROFILE', '')
+            principal, realm = self.parse_principal_name(env_principal)
             parsed_url = urlparse(self.service_url)
             service_hostname = parsed_url.hostname
+            service_principal = f"HTTP/{service_hostname}@{realm}"
+            token = self.krb_auth.principal_auth(principal, service_principal)
+
+            template_name = os.getenv('CERTMONGER_CA_PROFILE', '')
+            env_csr = os.getenv('CERTMONGER_CSR', '')
+            csr = self.clean_csr(env_csr)
             request_data = {
-                "templateName": env_template_name,
-                'csr': self.clean_csr(env_csr)
+                "templateName": template_name,
+                'csr': csr
             }
-
-            token = self.krb_auth.principal_auth(env_principal, service_hostname)
-
             response = self.api_helper.request_certificate(request_data, token)
             status_code = response.status_code
             self.logger.info(f"Получен ответ от сервера CA. Статус: {status_code}")
@@ -363,6 +343,29 @@ class CertHelper:
 
         csr_clean = ''.join(csr_clean.split())
         return csr_clean
+
+
+    def parse_principal_name(self, principal):
+        """
+        Формирует имя и извлекает realm.
+
+        :param host_name: строка с именем хоста (может содержать домен/сервис)
+
+        :return: UPN в формате 'HOSTNAME$' (например, 'CLIENT1$')
+        """
+
+        realm = ''
+        principal_name = ''
+        if '@' in principal:
+            parts = principal.split('@', 1)
+            principal_name = parts[0]
+            realm = parts[1].strip()
+        if '/' in principal:
+            host_name = principal_name.split('/')[1]
+            short_hostname = host_name.split('.')[0]
+            principal_name = f"{short_hostname.upper()}$"
+
+        return principal_name, realm
 
 
 def main():
