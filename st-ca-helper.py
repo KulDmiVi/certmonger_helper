@@ -68,12 +68,15 @@ class KerberosAuthentication:
     def principal_auth(self, principal, service_principal, is_host=True):
         """Получает токен Kerberos для principal."""
         self.logger.info("Get Kerberos token.")
+        try:
 
-        if is_host:
-            token = self.get_host_token(principal, service_principal)
-        else:
-            token = self.get_user_token(principal, service_principal)
-        return token
+            if is_host:
+                token = self.get_host_token(principal, service_principal)
+            else:
+                token = self.get_user_token(principal, service_principal)
+            return token
+        except Exception as e:
+            self.logger.error("Ошибка при получении токена")
 
     def get_host_token(self, principal, service_principal):
         """
@@ -114,40 +117,41 @@ class KerberosAuthentication:
             self.logger.info("GSSAPI токен успешно получен")
             return base64.b64encode(token).decode("utf-8")
         except Exception as e:
-            self.logger.error(f"Ошибка получения токена {e}")
+            self.logger.error(f"Ошибка получения токена компьютера {e}")
             return ''
 
-
     def get_user_token(self, principal, service_principal):
+        try:
+            tmp_script_path = f"/tmp/tmp_get_user_key.py"
+            txt_script = f'''#!/usr/bin/env python3
+            import base64
+            import gssapi
+            import pwd
+            import sys
+            user_info = pwd.getpwnam("{principal}")
+            uid = user_info.pw_uid
+            keyring_cache = f"KEYRING:persistent:{{uid}}"
+     
+            target_principal_name = gssapi.Name({service_principal}, gssapi.NameType.kerberos_principal)
+            creds = gssapi.Credentials(usage="initiate")
+            ctx = gssapi.SecurityContext(name=target_principal_name, creds=creds, usage="initiate")
+            token = ctx.step()
+            encode_token = base64.b64encode(token).decode("utf-8")
+            
+            print(encode_token)
+            sys.exit(0)
+            '''
+            with open(tmp_script_path, 'w') as f:
+                f.write(txt_script)
 
-        tmp_script_path = f"/tmp/tmp_get_user_key.py"
-        txt_script = f'''#!/usr/bin/env python3
-        import base64
-        import gssapi
-        import pwd
-        import sys
-        user_info = pwd.getpwnam("{principal}")
-        uid = user_info.pw_uid
-        keyring_cache = f"KEYRING:persistent:{{uid}}"
- 
-        target_principal_name = gssapi.Name({service_principal}, gssapi.NameType.kerberos_principal)
-        creds = gssapi.Credentials(usage="initiate")
-        ctx = gssapi.SecurityContext(name=target_principal_name, creds=creds, usage="initiate")
-        token = ctx.step()
-        encode_token = base64.b64encode(token).decode("utf-8")
-        
-        print(encode_token)
-        sys.exit(0)
-        '''
-        with open(tmp_script_path, 'w') as f:
-            f.write(txt_script)
+            os.chmod(tmp_script_path, 0o755)
 
-        os.chmod(tmp_script_path, 0o755)
-
-        cmd = ['su', '-', principal, '-c', f'python3 {tmp_script_path}']
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-        token = result.stdout.replace("\n", "")
-        return token
+            cmd = ['su', '-', principal, '-c', f'python3 {tmp_script_path}']
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+            token = result.stdout.replace("\n", "")
+            return token
+        except Exception as e:
+            self.logger.error("Ошибка при получения токена пользователя")
 
     def set_tgt(self, principal_name):
         kinit_cmd = [
@@ -271,7 +275,7 @@ class CertHelper:
         except Exception as e:
             error_msg = f"Критическая ошибка при обработке SUBMIT: {type(e).__name__}: {e}"
             self.logger.error(error_msg, exc_info=True)
-            raise
+
 
     def handler_poll(self):
         """Обрабатывает операцию POLL — запрос сертификата."""
@@ -344,7 +348,6 @@ class CertHelper:
         csr_clean = ''.join(csr_clean.split())
         return csr_clean
 
-
     def parse_principal_name(self, principal):
         """
         Формирует имя и извлекает realm.
@@ -353,19 +356,20 @@ class CertHelper:
 
         :return: UPN в формате 'HOSTNAME$' (например, 'CLIENT1$')
         """
-
-        realm = ''
-        principal_name = ''
-        if '@' in principal:
-            parts = principal.split('@', 1)
-            principal_name = parts[0]
-            realm = parts[1].strip()
-        if '/' in principal:
-            host_name = principal_name.split('/')[1]
-            short_hostname = host_name.split('.')[0]
-            principal_name = f"{short_hostname.upper()}$"
-
-        return principal_name, realm
+        try:
+            realm = ''
+            principal_name = ''
+            if '@' in principal:
+                parts = principal.split('@', 1)
+                principal_name = parts[0]
+                realm = parts[1].strip()
+            if '/' in principal:
+                host_name = principal_name.split('/')[1]
+                short_hostname = host_name.split('.')[0]
+                principal_name = f"{short_hostname.upper()}$"
+            return principal_name, realm
+        except Exception as e:
+            self.logger.error(f"Error parse principal name: {e}")
 
 
 def main():
