@@ -114,7 +114,7 @@ class KerberosAuthentication:
 
             token = ctx.step()
 
-            self.logger.info("GSSAPI токен успешно получен")
+            self.logger.debug(f"PC token {token}")
             return base64.b64encode(token).decode("utf-8")
         except Exception as e:
             self.logger.error(f"Ошибка получения токена компьютера {e}")
@@ -149,9 +149,10 @@ class KerberosAuthentication:
             cmd = ['su', '-', principal, '-c', f'python3 {tmp_script_path}']
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
             token = result.stdout.replace("\n", "")
+            self.logger.debug(f"User token: {token}")
             return token
         except Exception as e:
-            self.logger.error("Ошибка при получения токена пользователя")
+            self.logger.error(f"Ошибка при получения токена пользователя {e}")
 
     def set_tgt(self, principal_name):
         kinit_cmd = [
