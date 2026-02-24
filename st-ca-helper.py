@@ -316,7 +316,7 @@ class CertHelper:
         sys.exit(0)
 
     def handler_get_renew_request_requirements(self):
-        """"Возвращает требования для продления сертификата."""
+        """Возвращает требования для продления сертификата."""
         self.logger.info("=== STARTING GET_RENEW_REQUEST_REQUIREMENTS ===")
         requirements = "existing_cert=required,new_csr=optional"
         print(requirements)
