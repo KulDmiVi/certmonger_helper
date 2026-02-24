@@ -65,7 +65,7 @@ class KerberosAuthentication:
         self.logger = logger
         self.keytab_path = keytab_path
 
-    def principal_auth(self, principal, service_principal, is_host=True):
+    def principal_auth(self, principal, service_principal, is_host):
         """Получает токен Kerberos для principal."""
         self.logger.info("Get Kerberos token.")
         try:
@@ -251,11 +251,11 @@ class CertHelper:
             self.logger.info("Обработка запроса на получения сертификата (SUBMIT)")
 
             env_principal = os.getenv('CERTMONGER_REQ_PRINCIPAL', '')
-            principal, realm = self.parse_principal_name(env_principal)
+            principal, realm, is_host = self.parse_principal_name(env_principal)
             parsed_url = urlparse(self.service_url)
             service_hostname = parsed_url.hostname
             service_principal = f"HTTP/{service_hostname}@{realm}"
-            token = self.krb_auth.principal_auth(principal, service_principal)
+            token = self.krb_auth.principal_auth(principal, service_principal, is_host)
 
             template_name = os.getenv('CERTMONGER_CA_PROFILE', '')
             env_csr = os.getenv('CERTMONGER_CSR', '')
@@ -359,15 +359,19 @@ class CertHelper:
         try:
             realm = ''
             principal_name = ''
+            is_host = False
             if '@' in principal:
                 parts = principal.split('@', 1)
                 principal_name = parts[0]
                 realm = parts[1].strip()
-            if '/' in principal:
+            if 'host' in principal:
                 host_name = principal_name.split('/')[1]
                 short_hostname = host_name.split('.')[0]
                 principal_name = f"{short_hostname.upper()}$"
-            return principal_name, realm
+                is_host = True
+
+            self.logger.debug(f"Principal: {principal_name}, realm: {realm}")
+            return principal_name, realm, is_host
         except Exception as e:
             self.logger.error(f"Error parse principal name: {e}")
 
