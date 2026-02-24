@@ -132,7 +132,7 @@ import sys
 user_info = pwd.getpwnam("{principal}")
 uid = user_info.pw_uid
 keyring_cache = f"KEYRING:persistent:{{uid}}"
-target_principal_name = gssapi.Name({service_principal}, gssapi.NameType.kerberos_principal)
+target_principal_name = gssapi.Name("{service_principal}", gssapi.NameType.kerberos_principal)
 creds = gssapi.Credentials(usage="initiate")
 ctx = gssapi.SecurityContext(name=target_principal_name, creds=creds, usage="initiate")
 token = ctx.step()
