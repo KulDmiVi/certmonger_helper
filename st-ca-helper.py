@@ -137,7 +137,7 @@ class KerberosAuthentication:
             ctx = gssapi.SecurityContext(name=target_principal_name, creds=creds, usage="initiate")
             token = ctx.step()
             encode_token = base64.b64encode(token).decode("utf-8")
-            
+     
             print(encode_token)
             sys.exit(0)
             '''
@@ -148,6 +148,7 @@ class KerberosAuthentication:
 
             cmd = ['su', '-', principal, '-c', f'python3 {tmp_script_path}']
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+            self.logger.debug(f"User token: {result}")
             token = result.stdout.replace("\n", "")
             self.logger.debug(f"User token: {token}")
             return token
