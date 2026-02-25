@@ -273,6 +273,20 @@ class CertHelper:
             if status_code >= 400:
                 error_details = response.json()
                 self.logger.error(f"Детали ошибки от CA: {error_details}")
+            elif status_code ==201:
+                result = response.json()
+                cert_data = result.get('payload').get('cert')
+                request_id = result.get('payload').get('requestId')
+                if cert_data:
+                    self.logger.debug("Certificate returned ")
+                    print(cert_data, end='')
+                    sys.exit(0)
+                else:
+                    self.logger.debug(f"Certificate not ready, returning request_id: {request_id}")
+                    # Нужно polling - передаем request_id как cookie
+                    print('30')
+                    print(request_id)
+                    sys.exit(5)
 
         except Exception as e:
             error_msg = f"Критическая ошибка при обработке SUBMIT: {type(e).__name__}: {e}"
