@@ -273,7 +273,7 @@ class CertHelper:
             if status_code >= 400:
                 error_details = response.json()
                 self.logger.error(f"Детали ошибки от CA: {error_details}")
-            elif status_code ==201:
+            elif status_code == 201:
                 result = response.json()
                 cert_data = result.get('payload').get('cert')
                 request_id = result.get('payload').get('requestId')
