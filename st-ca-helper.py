@@ -88,7 +88,7 @@ class KerberosAuthentication:
         """
         self.logger.info(f"Получения токена для аутентификации")
         try:
-            tgt_status = self.set_tgt(principal)
+            self.set_tgt(principal)
             client_principal = gssapi.Name(
                 principal,
                 gssapi.NameType.kerberos_principal
@@ -174,7 +174,7 @@ sys.exit(0)
             self.logger.error("TGT not aviable")
             return False
         else:
-            self.logger.error("TGT для {host_principal_name} успешно получен")
+            self.logger.info(f"TGT для {principal_name} успешно получен")
             return True
 
 
@@ -267,12 +267,16 @@ class CertHelper:
                 'csr': csr
             }
             response = self.api_helper.request_certificate(request_data, token)
+            if not response:
+                self.logger.error(f"CA не отвечает")
+                sys.exit(1)
             status_code = response.status_code
             self.logger.info(f"Получен ответ от сервера CA. Статус: {status_code}")
 
             if status_code >= 400:
                 error_details = response.json()
                 self.logger.error(f"Детали ошибки от CA: {error_details}")
+                sys.exit(2)
             elif status_code == 201:
                 result = response.json()
                 cert_data = result.get('payload').get('cert')
